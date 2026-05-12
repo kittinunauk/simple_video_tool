@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Video Frame Trimmer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #161616; color: #eee;
+    padding: 20px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  h3 { margin: 20px 0 8px; font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+  video { width: 100%; max-height: 60vh; background: #000; display: block; border-radius: 6px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+  button {
+    padding: 8px 14px; background: #2a2a2a; color: #eee;
+    border: 1px solid #444; border-radius: 4px; cursor: pointer;
+    font-size: 13px; font-family: inherit;
+  }
+  button:hover:not(:disabled) { background: #3a3a3a; border-color: #666; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: #1e5fb4; border-color: #2a7fd4; }
+  button.primary:hover:not(:disabled) { background: #2a7fd4; }
+  button.mark-start { background: #2e5a1e; border-color: #4a8a2e; }
+  button.mark-end { background: #5a3a1e; border-color: #8a5a2e; }
+  .info {
+    background: #1f1f1f; padding: 12px 16px; border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 16px;
+    align-items: center;
+  }
+  .info b { color: #888; font-weight: normal; }
+  .info span { color: #fff; }
+  .info .start { color: #9fd96f; }
+  .info .end { color: #f3a96b; }
+  input[type=file] { color: #eee; margin-bottom: 12px; }
+  input[type=number] {
+    background: #222; color: #eee; border: 1px solid #444;
+    padding: 4px 6px; border-radius: 4px; width: 70px; font-family: inherit;
+  }
+  .progress { background: #2a2a2a; height: 6px; border-radius: 3px; overflow: hidden; margin: 10px 0; }
+  .progress-bar { background: #4a9eff; height: 100%; width: 0; transition: width 0.1s; }
+
+  .scrubber-wrap {
+    position: relative; margin: 12px 0 4px;
+    height: 28px;
+  }
+  .scrubber-track {
+    position: absolute; left: 0; right: 0; top: 11px; height: 6px;
+    background: #2a2a2a; border-radius: 3px; pointer-events: none;
+  }
+  .scrubber-range {
+    position: absolute; top: 11px; height: 6px;
+    background: rgba(74, 158, 255, 0.35); border-radius: 3px; pointer-events: none;
+  }
+  .scrubber-marker {
+    position: absolute; top: 4px; width: 2px; height: 20px;
+    pointer-events: none; border-radius: 1px;
+  }
+  .scrubber-marker.start { background: #9fd96f; }
+  .scrubber-marker.end { background: #f3a96b; }
+  #scrubber {
+    -webkit-appearance: none; appearance: none;
+    position: absolute; left: 0; right: 0; top: 0;
+    width: 100%; height: 28px;
+    background: transparent; cursor: pointer;
+    margin: 0; padding: 0;
+  }
+  #scrubber::-webkit-slider-runnable-track { height: 28px; background: transparent; }
+  #scrubber::-moz-range-track { height: 28px; background: transparent; border: none; }
+  #scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 24px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff;
+    margin-top: 2px; cursor: grab;
+  }
+  #scrubber::-moz-range-thumb {
+    width: 14px; height: 24px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff; cursor: grab;
+  }
+  #scrubber:active::-webkit-slider-thumb { cursor: grabbing; }
+  #status { font-size: 13px; color: #aaa; min-height: 1.2em; }
+  .frames { display: flex; flex-wrap: wrap; gap: 8px; }
+  .frame-thumb {
+    background: #222; border: 1px solid #333; border-radius: 4px; overflow: hidden;
+    position: relative;
+  }
+  .frame-thumb img { display: block; width: 160px; }
+  .frame-thumb .label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.75); padding: 4px 6px;
+    font-size: 11px; font-family: ui-monospace, monospace;
+  }
+  .frame-thumb .close {
+    position: absolute; top: 4px; right: 4px;
+    background: rgba(0,0,0,0.7); border: none; color: #fff;
+    width: 22px; height: 22px; border-radius: 50%; cursor: pointer; padding: 0;
+    line-height: 1; font-size: 14px;
+  }
+  .empty { color: #666; font-style: italic; }
+  kbd {
+    background: #2a2a2a; border: 1px solid #444; border-bottom-width: 2px;
+    border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .hint { color: #777; font-size: 12px; margin-top: 8px; }
+  #drop-zone {
+    border: 2px dashed #444; border-radius: 8px;
+    padding: 32px; text-align: center; color: #888;
+    margin-bottom: 12px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  #drop-zone:hover { border-color: #666; color: #aaa; }
+  body.dragging #drop-zone,
+  body.dragging::after {
+    border-color: #4a9eff; background: rgba(74,158,255,0.08); color: #fff;
+  }
+  body.dragging::after {
+    content: 'Drop video to load';
+    position: fixed; inset: 0;
+    background: rgba(20,20,20,0.85);
+    border: 3px dashed #4a9eff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #fff; z-index: 1000;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>Video Frame Trimmer</h1>
+
+<div id="drop-zone" onclick="document.getElementById('file').click()">
+  Drop a video here or click to choose
+</div>
+<input type="file" id="file" accept="video/*" style="display:none">
+
+<div id="player" style="display:none">
+  <video id="video" preload="auto"></video>
+
+  <div class="scrubber-wrap">
+    <div class="scrubber-track"></div>
+    <div class="scrubber-range" id="scrubber-range"></div>
+    <div class="scrubber-marker start" id="scrubber-start" style="display:none"></div>
+    <div class="scrubber-marker end" id="scrubber-end" style="display:none"></div>
+    <input type="range" id="scrubber" min="0" max="1000" value="0" step="1">
+  </div>
+
+  <div class="controls">
+    <button id="play" class="primary">▶ Play</button>
+    <button id="pause">⏸ Pause</button>
+    <button id="prev-frame">⏮ Prev Frame</button>
+    <button id="next-frame">⏭ Next Frame</button>
+    <button id="capture">📸 Capture Frame</button>
+    <button id="set-start" class="mark-start">⟦ Mark Start</button>
+    <button id="set-end" class="mark-end">⟧ Mark End</button>
+    <button id="goto-start">Go to Start</button>
+    <button id="goto-end">Go to End</button>
+    <button id="clear-marks">Clear Marks</button>
+    <button id="export" class="primary">💾 Export MP4 + JSON</button>
+    <label style="display:flex;align-items:center;gap:6px;padding:0 8px;font-size:13px;color:#ccc;">
+      <input type="checkbox" id="uuid-name" checked> UUID filename
+    </label>
+  </div>
+
+  <div class="info">
+    <b>Current:</b><span id="cur">00:00:00.000 (frame 0)</span>
+    <b>FPS:</b><span>
+      <input type="number" id="fps-input" value="30" min="1" max="240" step="0.001">
+      <span id="fps-detected" style="color:#888;font-size:11px"></span>
+    </span>
+    <b>Start:</b><span class="start" id="start">—</span>
+    <b>End:</b><span class="end" id="end">—</span>
+    <b>Duration:</b><span id="dur">—</span>
+    <b>Trim length:</b><span id="trim-len">—</span>
+  </div>
+
+  <div class="progress"><div class="progress-bar" id="progress"></div></div>
+  <div id="status"></div>
+  <pre id="error-log" style="display:none;background:#2a1a1a;border:1px solid #5a2a2a;border-radius:6px;padding:12px;font-size:12px;color:#fbb;white-space:pre-wrap;margin:8px 0;"></pre>
+
+  <div class="hint">
+    Keys: <kbd>Space</kbd> play/pause &nbsp;
+    <kbd>←</kbd>/<kbd>→</kbd> 5 s &nbsp;
+    <kbd>Shift</kbd>+arrow 1 s &nbsp;
+    <kbd>Alt</kbd>+arrow 10 s &nbsp;
+    <kbd>,</kbd>/<kbd>.</kbd> 1 frame &nbsp;
+    <kbd>I</kbd> mark in &nbsp;
+    <kbd>O</kbd> mark out &nbsp;
+    <kbd>C</kbd> capture &nbsp;
+    <kbd>E</kbd> export
+  </div>
+
+  <h3>Captured Frames</h3>
+  <div class="frames" id="captures"><span class="empty">No frames captured yet.</span></div>
+</div>
+
+<script type="module">
+import { Muxer, ArrayBufferTarget } from 'https://esm.run/mp4-muxer@5';
+
+const $ = id => document.getElementById(id);
+const video = $('video');
+const fpsInput = $('fps-input');
+const scrubber = $('scrubber');
+let scrubbing = false;
+let wasPlayingBeforeScrub = false;
+
+let fps = 30;
+let startTime = null;
+let endTime = null;
+let sourceName = 'video';
+let sourceFile = null;
+
+const fmt = (t) => {
+  if (t == null || isNaN(t)) return '—';
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.floor(t % 60);
+  const ms = Math.round((t - Math.floor(t)) * 1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+};
+
+const frameOf = (t) => Math.round(t * fps);
+
+function updateInfo() {
+  const t = video.currentTime;
+  $('cur').textContent = `${fmt(t)} (frame ${frameOf(t)})`;
+  $('start').textContent = startTime != null ? `${fmt(startTime)} (frame ${frameOf(startTime)})` : '—';
+  $('end').textContent = endTime != null ? `${fmt(endTime)} (frame ${frameOf(endTime)})` : '—';
+  $('dur').textContent = isNaN(video.duration) ? '—' : `${fmt(video.duration)} (${frameOf(video.duration)} frames)`;
+  if (startTime != null && endTime != null && endTime > startTime) {
+    $('trim-len').textContent = `${fmt(endTime - startTime)} (${frameOf(endTime) - frameOf(startTime)} frames)`;
+  } else {
+    $('trim-len').textContent = '—';
+  }
+  const pct = video.duration ? (t / video.duration) * 100 : 0;
+  $('progress').style.width = pct + '%';
+  updateScrubber();
+}
+
+function updateScrubber() {
+  if (!video.duration || isNaN(video.duration)) return;
+  const totalFrames = Math.max(1, frameOf(video.duration));
+  scrubber.max = totalFrames;
+  scrubber.step = 1;
+  if (!scrubbing) scrubber.value = frameOf(video.currentTime);
+
+  const startEl = $('scrubber-start');
+  const endEl = $('scrubber-end');
+  const rangeEl = $('scrubber-range');
+  if (startTime != null) {
+    startEl.style.display = 'block';
+    startEl.style.left = `calc(${(startTime / video.duration) * 100}% - 1px)`;
+  } else startEl.style.display = 'none';
+  if (endTime != null) {
+    endEl.style.display = 'block';
+    endEl.style.left = `calc(${(endTime / video.duration) * 100}% - 1px)`;
+  } else endEl.style.display = 'none';
+  if (startTime != null && endTime != null && endTime > startTime) {
+    const l = (startTime / video.duration) * 100;
+    const w = ((endTime - startTime) / video.duration) * 100;
+    rangeEl.style.display = 'block';
+    rangeEl.style.left = l + '%';
+    rangeEl.style.width = w + '%';
+  } else rangeEl.style.display = 'none';
+}
+
+async function loadVideoFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('video/') && !/\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(file.name)) {
+    alert('Not a video file: ' + file.name);
+    return;
+  }
+  sourceName = file.name.replace(/\.[^.]+$/, '');
+  sourceFile = file;
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(file);
+  $('player').style.display = 'block';
+  $('drop-zone').textContent = `Loaded: ${file.name} — drop another to replace`;
+  $('status').textContent = 'Loading video…';
+  startTime = null; endTime = null;
+  await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+  $('status').textContent = 'Detecting FPS…';
+  await detectFPS();
+  updateInfo();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+}
+
+$('file').addEventListener('change', e => loadVideoFile(e.target.files[0]));
+
+let dragDepth = 0;
+window.addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  dragDepth++;
+  document.body.classList.add('dragging');
+});
+window.addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragleave', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('dragging');
+});
+window.addEventListener('drop', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const file = e.dataTransfer.files[0];
+  if (file) loadVideoFile(file);
+});
+
+async function detectFPS() {
+  if (!('requestVideoFrameCallback' in HTMLVideoElement.prototype)) {
+    $('fps-detected').textContent = '(rVFC unsupported — using manual)';
+    $('status').textContent = '';
+    return;
+  }
+  video.muted = true;
+  try { await video.play(); }
+  catch {
+    $('fps-detected').textContent = '(autoplay blocked — using manual)';
+    $('status').textContent = '';
+    return;
+  }
+  const samples = [];
+  await new Promise(resolve => {
+    let count = 0;
+    const cb = (now, meta) => {
+      samples.push(meta.mediaTime);
+      if (++count < 30) video.requestVideoFrameCallback(cb);
+      else resolve();
+    };
+    video.requestVideoFrameCallback(cb);
+  });
+  video.pause();
+  video.currentTime = 0;
+  const diffs = [];
+  for (let i = 1; i < samples.length; i++) {
+    const d = samples[i] - samples[i-1];
+    if (d > 0) diffs.push(d);
+  }
+  if (!diffs.length) return;
+  diffs.sort((a,b) => a-b);
+  const median = diffs[Math.floor(diffs.length/2)];
+  const detected = 1 / median;
+  fps = Math.round(detected * 1000) / 1000;
+  fpsInput.value = fps;
+  $('fps-detected').textContent = `(detected ${fps})`;
+  $('status').textContent = '';
+}
+
+fpsInput.addEventListener('change', () => {
+  fps = parseFloat(fpsInput.value) || 30;
+  updateInfo();
+});
+
+video.addEventListener('timeupdate', updateInfo);
+video.addEventListener('seeked', updateInfo);
+video.addEventListener('loadedmetadata', updateInfo);
+
+scrubber.addEventListener('pointerdown', () => {
+  scrubbing = true;
+  wasPlayingBeforeScrub = !video.paused;
+  if (wasPlayingBeforeScrub) video.pause();
+});
+scrubber.addEventListener('pointerup', () => {
+  scrubbing = false;
+  if (wasPlayingBeforeScrub) video.play();
+});
+scrubber.addEventListener('input', () => {
+  if (!video.duration) return;
+  const frame = parseInt(scrubber.value, 10);
+  const t = Math.min(video.duration, frame / fps);
+  video.currentTime = t;
+  $('cur').textContent = `${fmt(t)} (frame ${frame})`;
+});
+
+$('play').onclick = () => video.play();
+$('pause').onclick = () => video.pause();
+$('prev-frame').onclick = () => {
+  video.pause();
+  video.currentTime = Math.max(0, video.currentTime - 1/fps);
+};
+$('next-frame').onclick = () => {
+  video.pause();
+  video.currentTime = Math.min(video.duration, video.currentTime + 1/fps);
+};
+
+$('set-start').onclick = () => {
+  startTime = video.currentTime;
+  if (endTime != null && endTime <= startTime) endTime = null;
+  updateInfo();
+};
+$('set-end').onclick = () => {
+  endTime = video.currentTime;
+  if (startTime != null && startTime >= endTime) startTime = null;
+  updateInfo();
+};
+$('goto-start').onclick = () => { if (startTime != null) video.currentTime = startTime; };
+$('goto-end').onclick = () => { if (endTime != null) video.currentTime = endTime; };
+$('clear-marks').onclick = () => { startTime = null; endTime = null; updateInfo(); };
+
+$('capture').onclick = () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const t = video.currentTime;
+  const frame = frameOf(t);
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const container = $('captures');
+    const empty = container.querySelector('.empty');
+    if (empty) empty.remove();
+    const div = document.createElement('div');
+    div.className = 'frame-thumb';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sourceName}_frame_${frame}.png`;
+    const img = document.createElement('img');
+    img.src = url;
+    a.appendChild(img);
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = `${fmt(t)} · f${frame}`;
+    const close = document.createElement('button');
+    close.className = 'close';
+    close.title = 'Remove';
+    close.textContent = '×';
+    close.onclick = (e) => {
+      e.stopPropagation();
+      URL.revokeObjectURL(url);
+      div.remove();
+      if (!container.querySelector('.frame-thumb')) {
+        const ep = document.createElement('span');
+        ep.className = 'empty';
+        ep.textContent = 'No frames captured yet.';
+        container.appendChild(ep);
+      }
+    };
+    div.append(a, label, close);
+    container.appendChild(div);
+  }, 'image/png');
+};
+
+$('export').onclick = async () => {
+  if (startTime == null || endTime == null) {
+    alert('Please mark both start and end first.');
+    return;
+  }
+  if (endTime <= startTime) {
+    alert('End must be after start.');
+    return;
+  }
+  if (!('VideoEncoder' in window)) {
+    alert('Your browser does not support WebCodecs (VideoEncoder). Use Chrome or Edge.');
+    return;
+  }
+  const btn = $('export');
+  btn.disabled = true;
+  $('status').textContent = 'Exporting… keep this tab focused.';
+  $('error-log').style.display = 'none';
+  try {
+    await exportTrim();
+    $('status').textContent = 'Export complete.';
+  } catch (err) {
+    console.error('Export failed:', err);
+    const fileInfo = sourceFile ? `\nFile: ${sourceFile.name}\nSize: ${sourceFile.size} bytes\nType: ${sourceFile.type || 'unknown'}` : '';
+    $('status').textContent = 'Export failed (see details below).';
+    $('error-log').style.display = 'block';
+    $('error-log').textContent = 'Export failed: ' + err.message + fileInfo + (err.stack ? '\n\n' + err.stack : '');
+  } finally {
+    btn.disabled = false;
+    $('progress').style.width = '0%';
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+};
+
+function parseLengthSize(description, codec) {
+  const c = (codec || '').toLowerCase();
+  try {
+    if (c.startsWith('avc')) return (description[4] & 0x03) + 1;
+    if (c.startsWith('hev') || c.startsWith('hvc')) return (description[21] & 0x03) + 1;
+  } catch {}
+  return 4;
+}
+
+function readNalLength(data, i, lengthSize) {
+  if (i + lengthSize > data.byteLength) return -1;
+  let len = 0;
+  for (let k = 0; k < lengthSize; k++) len = (len * 256) + data[i + k];
+  return len;
+}
+
+function describeNalsForLog(data, codec, lengthSize) {
+  const c = (codec || '').toLowerCase();
+  const isHevc = c.startsWith('hev') || c.startsWith('hvc');
+  const types = [];
+  let i = 0;
+  while (i + lengthSize < data.byteLength) {
+    const len = readNalLength(data, i, lengthSize);
+    if (len <= 0 || i + lengthSize + len > data.byteLength) { types.push('TRUNC'); break; }
+    const b0 = data[i + lengthSize];
+    const t = isHevc ? ((b0 >> 1) & 0x3F) : (b0 & 0x1F);
+    types.push(`${t}(${len})`);
+    i += lengthSize + len;
+    if (types.length > 12) { types.push('...'); break; }
+  }
+  return types.join(' ');
+}
+
+function stripNonSliceNals(data, codec, lengthSize) {
+  const c = (codec || '').toLowerCase();
+  const isHevc = c.startsWith('hev') || c.startsWith('hvc');
+  const isAvc = c.startsWith('avc');
+  if (!isHevc && !isAvc) return data;
+  const keep = [];
+  let i = 0;
+  while (i + lengthSize < data.byteLength) {
+    const len = readNalLength(data, i, lengthSize);
+    if (len <= 0 || i + lengthSize + len > data.byteLength) break;
+    const b0 = data[i + lengthSize];
+    let isSlice;
+    if (isHevc) {
+      const t = (b0 >> 1) & 0x3F;
+      isSlice = (t <= 9) || (t >= 16 && t <= 23);
+    } else {
+      const t = b0 & 0x1F;
+      isSlice = (t >= 1 && t <= 5);
+    }
+    if (isSlice) keep.push(data.subarray(i, i + lengthSize + len));
+    i += lengthSize + len;
+  }
+  if (!keep.length) return data;
+  let total = 0;
+  for (const n of keep) total += n.byteLength;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const n of keep) { out.set(n, off); off += n.byteLength; }
+  return out;
+}
+
+function detectKeyframeFromNAL(data, codec, lengthSize) {
+  const c = (codec || '').toLowerCase();
+  const isHevc = c.startsWith('hev') || c.startsWith('hvc');
+  const isAvc = c.startsWith('avc');
+  if (!isHevc && !isAvc) return null;
+  let i = 0;
+  let foundSlice = false;
+  while (i + lengthSize < data.byteLength) {
+    const len = readNalLength(data, i, lengthSize);
+    if (len <= 0 || i + lengthSize + len > data.byteLength) return null;
+    const b0 = data[i + lengthSize];
+    if (isHevc) {
+      const t = (b0 >> 1) & 0x3F;
+      if (t >= 16 && t <= 23) return true;
+      if (t <= 9) { foundSlice = true; }
+    } else {
+      const t = b0 & 0x1F;
+      if (t === 5) return true;
+      if (t === 1) { foundSlice = true; }
+    }
+    i += lengthSize + len;
+  }
+  return foundSlice ? false : null;
+}
+
+async function streamFileIntoMp4Box(file, mp4box, onProgress) {
+  const reader = file.stream().getReader();
+  let offset = 0;
+  const total = file.size;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const ab = new ArrayBuffer(value.byteLength);
+    new Uint8Array(ab).set(value);
+    ab.fileStart = offset;
+    mp4box.appendBuffer(ab);
+    offset += value.byteLength;
+    if (onProgress) onProgress(offset, total);
+    if ((offset & 0x7FFFFF) === 0) await new Promise(r => setTimeout(r, 0));
+  }
+  mp4box.flush();
+}
+
+async function readFileBytes(file) {
+  const errors = [];
+  $('status').textContent = 'Reading file (arrayBuffer)…';
+  try { return await file.arrayBuffer(); }
+  catch (e) { errors.push('arrayBuffer: ' + e.message); }
+
+  $('status').textContent = 'Reading file (chunked)…';
+  try {
+    const chunkSize = 4 * 1024 * 1024;
+    const total = file.size;
+    const out = new Uint8Array(total);
+    let offset = 0;
+    while (offset < total) {
+      const end = Math.min(offset + chunkSize, total);
+      let attempt = 0, chunk = null;
+      while (true) {
+        try {
+          chunk = await file.slice(offset, end).arrayBuffer();
+          break;
+        } catch (err) {
+          if (++attempt >= 4) throw err;
+          await new Promise(r => setTimeout(r, 150 * attempt));
+        }
+      }
+      out.set(new Uint8Array(chunk), offset);
+      offset = end;
+      $('status').textContent = `Reading file (chunked) ${Math.round(offset/total*100)}%…`;
+    }
+    return out.buffer;
+  } catch (e) { errors.push('chunked: ' + e.message); }
+
+  $('status').textContent = 'Reading file (stream)…';
+  try {
+    const reader = file.stream().getReader();
+    const parts = [];
+    let total = 0;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      parts.push(value);
+      total += value.byteLength;
+    }
+    const out = new Uint8Array(total);
+    let pos = 0;
+    for (const p of parts) { out.set(p, pos); pos += p.byteLength; }
+    return out.buffer;
+  } catch (e) { errors.push('stream: ' + e.message); }
+
+  $('status').textContent = 'Reading file (blob URL fetch)…';
+  try {
+    const url = video.src && video.src.startsWith('blob:') ? video.src : URL.createObjectURL(file);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('fetch status ' + res.status);
+    return await res.arrayBuffer();
+  } catch (e) { errors.push('fetch(blob): ' + e.message); }
+
+  $('status').textContent = 'Reading file (FileReader)…';
+  try {
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('FileReader failed'));
+      r.readAsArrayBuffer(file);
+    });
+  } catch (e) { errors.push('FileReader: ' + e.message); }
+
+  throw new Error(
+    'Could not read file after 5 strategies (' + errors.join(' | ') + ').\n' +
+    'Try: (1) run "xattr -c \'' + file.name + '\'" in Terminal to clear extended attributes, ' +
+    '(2) copy the file to ~/Downloads, (3) quit any app that has the file open.'
+  );
+}
+
+async function getSourceBuffer() {
+  if (sourceBuffer) return sourceBuffer;
+  if (!sourceFile) throw new Error('No source file');
+  sourceBuffer = await readFileBytes(sourceFile);
+  return sourceBuffer;
+}
+
+async function demuxMp4FromFile(file, startUs, endUs, onProgress) {
+  const mod = await import('https://cdn.jsdelivr.net/npm/mp4box@0.5.4/+esm');
+  const MP4Box = mod.default || mod;
+  const DataStream = MP4Box.DataStream;
+
+  const mp4box = MP4Box.createFile();
+  const samples = [];
+  let trackInfo = null;
+  let description = null;
+  let started = false;
+  let timescale = 1;
+  let trackId = null;
+  let pendingError = null;
+
+  let phase = 'pre';
+  let codec = '';
+  let lengthSize = 4;
+  let pendingPre = [];
+  let mismatchCount = 0;
+  let loggedFirst = false;
+
+  mp4box.onError = (e) => { pendingError = new Error('mp4box: ' + e); };
+  mp4box.onReady = (info) => {
+    const vt = info.videoTracks[0];
+    if (!vt) { pendingError = new Error('No video track found in source'); return; }
+    trackInfo = vt;
+    trackId = vt.id;
+    timescale = vt.timescale;
+    codec = vt.codec || '';
+    const trak = mp4box.getTrackById(vt.id);
+    let box = null;
+    for (const entry of trak.mdia.minf.stbl.stsd.entries) {
+      box = entry.avcC || entry.hvcC || entry.vpcC || entry.av1C;
+      if (box) break;
+    }
+    if (!box) { pendingError = new Error('Codec configuration box not found'); return; }
+    const ds = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+    box.write(ds);
+    description = new Uint8Array(ds.buffer, 8);
+    lengthSize = parseLengthSize(description, codec);
+    console.log('Source codec:', codec, '| lengthSize:', lengthSize, '| description bytes:', description.length);
+    mp4box.setExtractionOptions(vt.id, null, { nbSamples: 200 });
+    mp4box.onSamples = (id, user, sampleList) => {
+      if (phase === 'done') return;
+      for (const s of sampleList) {
+        const cts = Math.round((s.cts * 1_000_000) / timescale);
+        const dur = Math.round((s.duration * 1_000_000) / timescale);
+        const cloned = new Uint8Array(s.data.byteLength);
+        cloned.set(s.data);
+        const nalKey = detectKeyframeFromNAL(cloned, codec, lengthSize);
+        const isKey = nalKey !== null ? nalKey : !!s.is_sync;
+        if (nalKey !== null && nalKey !== !!s.is_sync) mismatchCount++;
+        if (!loggedFirst) {
+          const hex = Array.from(cloned.slice(0, 24)).map(b => b.toString(16).padStart(2,'0')).join(' ');
+          const nals = describeNalsForLog(cloned, codec, lengthSize);
+          console.log(`First sample: cts=${cts}us is_sync=${s.is_sync} nalKey=${nalKey} size=${cloned.byteLength}`);
+          console.log(`  hex=[${hex}...]`);
+          console.log(`  NALs (type(len)): ${nals}`);
+          loggedFirst = true;
+        }
+        const entry = { is_sync: isKey, cts, duration: dur, data: cloned };
+
+        if (phase === 'pre') {
+          if (isKey && cts <= startUs) {
+            pendingPre = [entry];
+          } else if (cts <= startUs) {
+            if (pendingPre.length) pendingPre.push(entry);
+          } else {
+            if (pendingPre.length) {
+              for (const p of pendingPre) samples.push(p);
+              pendingPre = [];
+              samples.push(entry);
+              phase = 'in';
+            } else if (isKey) {
+              samples.push(entry);
+              phase = 'in';
+            }
+          }
+        } else if (phase === 'in') {
+          samples.push(entry);
+          if (isKey && cts >= endUs) {
+            phase = 'done';
+            break;
+          }
+        }
+      }
+      try { mp4box.releaseUsedSamples(id, sampleList[sampleList.length - 1].number + 1); } catch {}
+    };
+    mp4box.start();
+    started = true;
+  };
+
+  await streamFileIntoMp4Box(file, mp4box, onProgress);
+  await new Promise(r => setTimeout(r, 0));
+  if (pendingError) throw pendingError;
+  if (!started) throw new Error('mp4box never reached ready state (unsupported or corrupt MP4?)');
+  if (mismatchCount > 0) console.warn(`is_sync vs NAL keyframe mismatches: ${mismatchCount}`);
+
+  if (samples.length && !samples[0].is_sync) {
+    let firstKey = -1;
+    for (let i = 0; i < samples.length; i++) {
+      const k = detectKeyframeFromNAL(samples[i].data, codec, lengthSize);
+      if (k === true) { firstKey = i; break; }
+    }
+    console.warn(`samples[0] not flagged sync; first NAL-detected keyframe at idx ${firstKey}`);
+    if (firstKey > 0) samples.splice(0, firstKey);
+    else if (firstKey === -1) console.error('No NAL keyframe found at all in collected samples');
+  }
+  console.log(`Demux done: ${samples.length} samples, first is_sync=${samples[0]?.is_sync}, codec=${codec}`);
+  return { trackInfo, description, samples };
+}
+
+async function exportTrim() {
+  if (!sourceFile) throw new Error('No source file loaded');
+
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  const useFps = fps;
+  const intFps = Math.max(1, Math.round(useFps));
+  const bitrate = Math.max(2_000_000, Math.round(width * height * useFps * 0.12));
+  const frameDurationUs = Math.round(1_000_000 / useFps);
+  const startUs = Math.round(startTime * 1_000_000);
+  const endUs = Math.round(endTime * 1_000_000);
+  const totalFrames = Math.max(1, Math.round((endTime - startTime) * useFps));
+
+  if (!sourceFile) throw new Error('No source file');
+  $('status').textContent = 'Demuxing source…';
+  const demuxed = await demuxMp4FromFile(
+    sourceFile, startUs, endUs,
+    (off, tot) => { $('status').textContent = `Demuxing source ${Math.round(off/tot*100)}%…`; }
+  );
+  const { trackInfo, description, samples } = demuxed;
+  const sourceCodec = trackInfo.codec;
+  const sourceLengthSize = parseLengthSize(description, sourceCodec);
+  if (!samples.length) throw new Error('No samples extracted from source');
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width, height, frameRate: intFps },
+    fastStart: 'in-memory',
+  });
+
+  let pipeError = null;
+  let outIdx = 0;
+
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => { pipeError = e; },
+  });
+
+  const codecCandidates = ['avc1.640028', 'avc1.4D4028', 'avc1.42E028', 'avc1.42E01F'];
+  let configured = false;
+  for (const codec of codecCandidates) {
+    try {
+      const support = await VideoEncoder.isConfigSupported({
+        codec, width, height, bitrate, framerate: intFps, avc: { format: 'avc' },
+      });
+      if (support.supported) { encoder.configure(support.config); configured = true; break; }
+    } catch {}
+  }
+  if (!configured) throw new Error('No supported H.264 encoder config found.');
+
+  const decoder = new VideoDecoder({
+    output: (frame) => {
+      try {
+        const tEndUs = frame.timestamp + (frame.duration || frameDurationUs);
+        if (tEndUs <= startUs || frame.timestamp >= endUs || outIdx >= totalFrames) {
+          frame.close();
+          return;
+        }
+        const ts = outIdx * frameDurationUs;
+        const rt = new VideoFrame(frame, { timestamp: ts, duration: frameDurationUs });
+        encoder.encode(rt, { keyFrame: outIdx % 60 === 0 });
+        rt.close();
+        frame.close();
+        outIdx++;
+        $('progress').style.width = ((outIdx / totalFrames) * 100) + '%';
+        $('status').textContent = `Encoding frame ${outIdx} / ${totalFrames}…`;
+      } catch (e) {
+        pipeError = e;
+        try { frame.close(); } catch {}
+      }
+    },
+    error: (e) => { pipeError = e; },
+  });
+
+  decoder.configure({
+    codec: trackInfo.codec,
+    codedWidth: trackInfo.video.width,
+    codedHeight: trackInfo.video.height,
+    description,
+  });
+
+  $('status').textContent = 'Decoding & encoding…';
+  for (let i = 0; i < samples.length; i++) {
+    if (pipeError) throw pipeError;
+    const s = samples[i];
+    const cleaned = stripNonSliceNals(s.data, sourceCodec, sourceLengthSize);
+    if (i === 0) {
+      console.log(`First decode chunk: type=${s.is_sync ? 'key' : 'delta'}, original=${s.data.byteLength}B, cleaned=${cleaned.byteLength}B, NALs=${describeNalsForLog(cleaned, sourceCodec, sourceLengthSize)}`);
+    }
+    decoder.decode(new EncodedVideoChunk({
+      type: s.is_sync ? 'key' : 'delta',
+      timestamp: s.cts,
+      duration: s.duration,
+      data: cleaned,
+    }));
+    samples[i] = null;
+    while (decoder.decodeQueueSize > 30 || encoder.encodeQueueSize > 30) {
+      await new Promise(r => setTimeout(r, 4));
+      if (pipeError) throw pipeError;
+    }
+  }
+
+  await decoder.flush();
+  await encoder.flush();
+  if (pipeError) throw pipeError;
+  muxer.finalize();
+
+  const useUuid = $('uuid-name').checked;
+  const uuid = (crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2)));
+  const outBase = useUuid
+    ? uuid
+    : `${sourceName}_trim_${frameOf(startTime)}-${frameOf(endTime)}`;
+  download(new Blob([muxer.target.buffer], { type: 'video/mp4' }), outBase + '.mp4');
+
+  const meta = {
+    uuid,
+    originalFilename: sourceFile ? sourceFile.name : null,
+    source: sourceName,
+    fps: useFps,
+    resolution: { width, height },
+    start: { timestamp: fmt(startTime), seconds: startTime, frame: frameOf(startTime) },
+    end:   { timestamp: fmt(endTime),   seconds: endTime,   frame: frameOf(endTime) },
+    duration: {
+      timestamp: fmt(endTime - startTime),
+      seconds: endTime - startTime,
+      frames: outIdx,
+    },
+    exportedAt: new Date().toISOString(),
+    output: outBase + '.mp4',
+  };
+  download(new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' }), outBase + '.json');
+}
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 1000);
+}
+
+function skipBy(seconds) {
+  if (!video.duration) return;
+  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + seconds));
+}
+
+const TYPING_TYPES = new Set(['text','number','search','email','url','tel','password']);
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'TEXTAREA') return;
+  if (tag === 'INPUT' && TYPING_TYPES.has((e.target.type || '').toLowerCase())) return;
+  if (video.readyState < 1) return;
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      video.paused ? video.play() : video.pause();
+      break;
+    case 'ArrowLeft': {
+      e.preventDefault();
+      const step = e.shiftKey ? 1 : e.altKey ? 10 : 5;
+      skipBy(-step);
+      break;
+    }
+    case 'ArrowRight': {
+      e.preventDefault();
+      const step = e.shiftKey ? 1 : e.altKey ? 10 : 5;
+      skipBy(step);
+      break;
+    }
+    case ',': case '<': $('prev-frame').click(); break;
+    case '.': case '>': $('next-frame').click(); break;
+    case 'i': case 'I': $('set-start').click(); break;
+    case 'o': case 'O': $('set-end').click(); break;
+    case 'c': case 'C': $('capture').click(); break;
+    case 'e': case 'E':
+      if (!$('export').disabled) $('export').click();
+      break;
+  }
+});
+</script>
+</body>
+</html>
