@@ -44,6 +44,27 @@
   .progress { background: #2a2a2a; height: 6px; border-radius: 3px; overflow: hidden; margin: 10px 0; }
   .progress-bar { background: #4a9eff; height: 100%; width: 0; transition: width 0.1s; }
 
+  .ffmpeg-box {
+    background: #1f1f1f; border: 1px solid #333; border-radius: 6px;
+    margin-top: 12px; padding: 10px 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ffmpeg-box code {
+    flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: #d8d8d8; white-space: pre-wrap; word-break: break-all;
+    background: transparent;
+  }
+  .ffmpeg-box code.empty { color: #666; font-style: italic; }
+  .ffmpeg-box .copy-btn {
+    flex-shrink: 0; padding: 6px 10px; font-size: 12px;
+  }
+  .ffmpeg-box .copy-btn.copied { background: #2e5a1e; border-color: #4a8a2e; }
+  .ffmpeg-mode {
+    display: flex; gap: 12px; margin-bottom: 6px;
+    font-size: 12px; color: #aaa;
+  }
+  .ffmpeg-mode label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
   .scrubber-wrap {
     position: relative; margin: 12px 0 4px;
     height: 28px;
@@ -178,6 +199,16 @@
     <b>Trim length:</b><span id="trim-len">—</span>
   </div>
 
+  <h3>FFmpeg Command</h3>
+  <div class="ffmpeg-mode">
+    <label><input type="radio" name="ffmpeg-mode" value="copy" checked> Stream copy (fast, keyframe-aligned)</label>
+    <label><input type="radio" name="ffmpeg-mode" value="reencode"> Re-encode (frame-accurate)</label>
+  </div>
+  <div class="ffmpeg-box">
+    <code id="ffmpeg-cmd" class="empty">Mark start and end to generate command.</code>
+    <button id="copy-ffmpeg" class="copy-btn" disabled>📋 Copy</button>
+  </div>
+
   <div class="progress"><div class="progress-bar" id="progress"></div></div>
   <div id="status"></div>
   <pre id="error-log" style="display:none;background:#2a1a1a;border:1px solid #5a2a2a;border-radius:6px;padding:12px;font-size:12px;color:#fbb;white-space:pre-wrap;margin:8px 0;"></pre>
@@ -214,6 +245,17 @@ let endTime = null;
 let sourceName = 'video';
 let sourceFile = null;
 
+let ffmpegUuid = null;
+let ffmpegUuidKey = null;
+function ensureFfmpegUuid() {
+  const key = `${startTime}|${endTime}`;
+  if (key !== ffmpegUuidKey || !ffmpegUuid) {
+    ffmpegUuid = crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    ffmpegUuidKey = key;
+  }
+  return ffmpegUuid;
+}
+
 const fmt = (t) => {
   if (t == null || isNaN(t)) return '—';
   const h = Math.floor(t / 3600);
@@ -239,6 +281,48 @@ function updateInfo() {
   const pct = video.duration ? (t / video.duration) * 100 : 0;
   $('progress').style.width = pct + '%';
   updateScrubber();
+  updateFfmpegCmd();
+}
+
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+function buildFfmpegPlan() {
+  if (startTime == null || endTime == null || endTime <= startTime) return null;
+  const input = sourceFile ? sourceFile.name : `${sourceName}.mp4`;
+  const useUuid = $('uuid-name')?.checked;
+  const uuid = ensureFfmpegUuid();
+  const outBase = useUuid
+    ? uuid
+    : `${sourceName}_trim_${frameOf(startTime)}-${frameOf(endTime)}`;
+  const output = `${outBase}.mp4`;
+  const ss = fmt(startTime);
+  const to = fmt(endTime);
+  const mode = document.querySelector('input[name="ffmpeg-mode"]:checked')?.value || 'copy';
+  const cmd = mode === 'copy'
+    ? `ffmpeg -ss ${ss} -to ${to} -i ${shellQuote(input)} -c copy ${shellQuote(output)}`
+    : `ffmpeg -i ${shellQuote(input)} -ss ${ss} -to ${to} -c:v libx264 -preset medium -crf 18 -c:a aac -b:a 192k ${shellQuote(output)}`;
+  return { cmd, uuid, outBase, output, mode };
+}
+
+function buildFfmpegCmd() {
+  return buildFfmpegPlan()?.cmd ?? null;
+}
+
+function updateFfmpegCmd() {
+  const cmd = buildFfmpegCmd();
+  const el = $('ffmpeg-cmd');
+  const btn = $('copy-ffmpeg');
+  if (cmd) {
+    el.textContent = cmd;
+    el.classList.remove('empty');
+    btn.disabled = false;
+  } else {
+    el.textContent = 'Mark start and end to generate command.';
+    el.classList.add('empty');
+    btn.disabled = true;
+  }
 }
 
 function updateScrubber() {
@@ -407,6 +491,56 @@ $('set-end').onclick = () => {
 $('goto-start').onclick = () => { if (startTime != null) video.currentTime = startTime; };
 $('goto-end').onclick = () => { if (endTime != null) video.currentTime = endTime; };
 $('clear-marks').onclick = () => { startTime = null; endTime = null; updateInfo(); };
+
+document.querySelectorAll('input[name="ffmpeg-mode"]').forEach(r => {
+  r.addEventListener('change', updateFfmpegCmd);
+});
+$('uuid-name').addEventListener('change', updateFfmpegCmd);
+
+$('copy-ffmpeg').onclick = async () => {
+  const plan = buildFfmpegPlan();
+  if (!plan) return;
+  const btn = $('copy-ffmpeg');
+  try {
+    await navigator.clipboard.writeText(plan.cmd);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = plan.cmd;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+
+  const meta = {
+    uuid: plan.uuid,
+    originalFilename: sourceFile ? sourceFile.name : null,
+    source: sourceName,
+    fps,
+    resolution: { width: video.videoWidth, height: video.videoHeight },
+    start: { timestamp: fmt(startTime), seconds: startTime, frame: frameOf(startTime) },
+    end:   { timestamp: fmt(endTime),   seconds: endTime,   frame: frameOf(endTime) },
+    duration: {
+      timestamp: fmt(endTime - startTime),
+      seconds: endTime - startTime,
+      frames: frameOf(endTime) - frameOf(startTime),
+    },
+    exportedAt: new Date().toISOString(),
+    output: plan.output,
+    ffmpeg: { mode: plan.mode, command: plan.cmd },
+  };
+  download(new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' }), plan.outBase + '.json');
+
+  const orig = btn.textContent;
+  btn.textContent = '✓ Copied + JSON saved';
+  btn.classList.add('copied');
+  setTimeout(() => {
+    btn.textContent = orig;
+    btn.classList.remove('copied');
+  }, 1400);
+};
 
 $('capture').onclick = () => {
   const canvas = document.createElement('canvas');
