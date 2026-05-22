@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Video Crop Tool</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #161616; color: #eee;
+    padding: 20px; max-width: 1100px; margin: 0 auto;
+  }
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  h3 { margin: 20px 0 8px; font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+  a { color: #4a9eff; }
+  .top-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .top-bar .spacer { flex: 1; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; align-items: center; }
+  select {
+    background: #222; color: #eee; border: 1px solid #444;
+    padding: 4px 6px; border-radius: 4px; font-family: inherit; font-size: 13px;
+  }
+  button {
+    padding: 8px 14px; background: #2a2a2a; color: #eee;
+    border: 1px solid #444; border-radius: 4px; cursor: pointer;
+    font-size: 13px; font-family: inherit;
+  }
+  button:hover:not(:disabled) { background: #3a3a3a; border-color: #666; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: #1e5fb4; border-color: #2a7fd4; }
+  button.primary:hover:not(:disabled) { background: #2a7fd4; }
+  button.mark-start { background: #2e5a1e; border-color: #4a8a2e; }
+  button.mark-start:hover:not(:disabled) { background: #3e7a2e; }
+  button.mark-end { background: #5a3a1e; border-color: #8a5a2e; }
+  button.mark-end:hover:not(:disabled) { background: #7a4a2e; }
+
+  .scrubber-wrap { position: relative; margin: 10px 0 4px; height: 28px; }
+  .scrubber-track {
+    position: absolute; left: 0; right: 0; top: 11px; height: 6px;
+    background: #2a2a2a; border-radius: 3px; pointer-events: none;
+  }
+  .scrubber-range {
+    position: absolute; top: 11px; height: 6px;
+    background: rgba(74, 158, 255, 0.35); border-radius: 3px; pointer-events: none;
+  }
+  .scrubber-marker {
+    position: absolute; top: 4px; width: 2px; height: 20px;
+    pointer-events: none; border-radius: 1px;
+  }
+  .scrubber-marker.start { background: #9fd96f; }
+  .scrubber-marker.end { background: #f3a96b; }
+  #scrubber {
+    -webkit-appearance: none; appearance: none;
+    position: absolute; left: 0; right: 0; top: 0;
+    width: 100%; height: 28px;
+    background: transparent; cursor: pointer;
+    margin: 0; padding: 0;
+  }
+  #scrubber::-webkit-slider-runnable-track { height: 28px; background: transparent; }
+  #scrubber::-moz-range-track { height: 28px; background: transparent; border: none; }
+  #scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 24px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff;
+    margin-top: 2px; cursor: grab;
+  }
+  #scrubber::-moz-range-thumb {
+    width: 14px; height: 24px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff; cursor: grab;
+  }
+  #scrubber:active::-webkit-slider-thumb { cursor: grabbing; }
+
+  .info b.start, .info span.start { color: #9fd96f; }
+  .info b.end,   .info span.end   { color: #f3a96b; }
+
+  label.opt {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 8px; font-size: 13px; color: #ccc;
+  }
+
+  .info {
+    background: #1f1f1f; padding: 12px 16px; border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 16px;
+    align-items: center;
+  }
+  .info b { color: #888; font-weight: normal; }
+  .info span { color: #fff; }
+  .info .crop-val { color: #9fd96f; }
+
+  .ffmpeg-box {
+    background: #1f1f1f; border: 1px solid #333; border-radius: 6px;
+    margin-top: 12px; padding: 10px 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ffmpeg-box code {
+    flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: #d8d8d8; white-space: pre-wrap; word-break: break-all;
+    background: transparent;
+  }
+  .ffmpeg-box code.empty { color: #666; font-style: italic; }
+  .ffmpeg-box .copy-btn { flex-shrink: 0; padding: 6px 10px; font-size: 12px; }
+  .ffmpeg-box .copy-btn.copied { background: #2e5a1e; border-color: #4a8a2e; }
+
+  #status { font-size: 13px; color: #aaa; min-height: 1.2em; margin-top: 8px; }
+
+  #drop-zone {
+    border: 2px dashed #444; border-radius: 8px;
+    padding: 32px; text-align: center; color: #888;
+    margin-bottom: 12px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  #drop-zone:hover { border-color: #666; color: #aaa; }
+  body.dragging #drop-zone { border-color: #4a9eff; background: rgba(74,158,255,0.08); color: #fff; }
+  body.dragging::after {
+    content: 'Drop video to load';
+    position: fixed; inset: 0;
+    background: rgba(20,20,20,0.85);
+    border: 3px dashed #4a9eff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #fff; z-index: 1000;
+    pointer-events: none;
+  }
+
+  .player {
+    position: relative;
+    background: #000; border-radius: 6px;
+    display: flex; justify-content: center; align-items: center;
+    max-height: 70vh; overflow: hidden;
+  }
+  video {
+    max-width: 100%; max-height: 70vh;
+    display: block;
+  }
+  .overlay {
+    position: absolute;
+    cursor: crosshair;
+    user-select: none;
+    touch-action: none;
+  }
+  .crop-box {
+    position: absolute;
+    border: 2px solid #4a9eff;
+    background: rgba(74, 158, 255, 0.08);
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+    cursor: move;
+    box-sizing: border-box;
+  }
+  .handle {
+    position: absolute;
+    width: 12px; height: 12px;
+    background: #4a9eff;
+    border: 1px solid #fff;
+    border-radius: 2px;
+  }
+  .handle.nw { top: -7px; left: -7px;  cursor: nwse-resize; }
+  .handle.n  { top: -7px; left: 50%;   transform: translateX(-50%); cursor: ns-resize; }
+  .handle.ne { top: -7px; right: -7px; cursor: nesw-resize; }
+  .handle.e  { top: 50%;  right: -7px; transform: translateY(-50%); cursor: ew-resize; }
+  .handle.se { bottom: -7px; right: -7px; cursor: nwse-resize; }
+  .handle.s  { bottom: -7px; left: 50%;   transform: translateX(-50%); cursor: ns-resize; }
+  .handle.sw { bottom: -7px; left: -7px;  cursor: nesw-resize; }
+  .handle.w  { top: 50%;  left: -7px;  transform: translateY(-50%); cursor: ew-resize; }
+  .size-label {
+    position: absolute;
+    top: -22px; left: 0;
+    background: #4a9eff; color: #fff;
+    font-family: ui-monospace, monospace; font-size: 11px;
+    padding: 2px 6px; border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  kbd {
+    background: #2a2a2a; border: 1px solid #444; border-bottom-width: 2px;
+    border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace;
+    font-size: 11px;
+  }
+  .hint { color: #777; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>Video Crop Tool</h1>
+  <div class="spacer"></div>
+  <a href="index.html">Trimmer</a>
+  <a href="editor.html">Caption Editor</a>
+</div>
+
+<div id="drop-zone" onclick="document.getElementById('file').click()">
+  Drop a video here or click to choose
+</div>
+<input type="file" id="file" accept="video/*" style="display:none">
+
+<div id="player-wrap" style="display:none">
+  <div class="player" id="player">
+    <video id="video" controls preload="auto"></video>
+    <div class="overlay" id="overlay">
+      <div class="crop-box" id="crop-box" style="display:none">
+        <div class="handle nw" data-h="nw"></div>
+        <div class="handle n"  data-h="n"></div>
+        <div class="handle ne" data-h="ne"></div>
+        <div class="handle e"  data-h="e"></div>
+        <div class="handle se" data-h="se"></div>
+        <div class="handle s"  data-h="s"></div>
+        <div class="handle sw" data-h="sw"></div>
+        <div class="handle w"  data-h="w"></div>
+        <div class="size-label" id="crop-label">0 × 0</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrubber-wrap">
+    <div class="scrubber-track"></div>
+    <div class="scrubber-range" id="scrubber-range" style="display:none"></div>
+    <div class="scrubber-marker start" id="scrubber-start" style="display:none"></div>
+    <div class="scrubber-marker end" id="scrubber-end" style="display:none"></div>
+    <input type="range" id="scrubber" min="0" max="1" value="0" step="0.001">
+  </div>
+
+  <div class="controls">
+    <button id="play" class="primary">▶ Play</button>
+    <button id="pause">⏸ Pause</button>
+    <button id="set-start" class="mark-start">⟦ Mark In</button>
+    <button id="set-end" class="mark-end">⟧ Mark Out</button>
+    <button id="goto-start">Go to In</button>
+    <button id="goto-end">Go to Out</button>
+    <button id="clear-marks">Clear Marks</button>
+  </div>
+
+  <div class="controls">
+    <button id="select-all">Select All</button>
+    <button id="reset-crop">Clear Crop</button>
+    <label class="opt">Lock ratio:
+      <select id="aspect-lock">
+        <option value="free">Free</option>
+        <option value="16:9">16:9</option>
+        <option value="4:3">4:3</option>
+        <option value="1:1">1:1</option>
+        <option value="9:16">9:16</option>
+        <option value="3:4">3:4</option>
+      </select>
+    </label>
+    <label class="opt"><input type="checkbox" id="snap-even" checked> Snap to even (H.264)</label>
+    <label class="opt"><input type="checkbox" id="uuid-name" checked> UUID filename</label>
+    <label class="opt"><input type="checkbox" id="reencode" checked> Re-encode (vs. copy audio only)</label>
+  </div>
+
+  <div class="info">
+    <b>Source:</b><span id="src-dim">—</span>
+    <b>Duration:</b><span id="dur">—</span>
+    <b>Crop size:</b><span class="crop-val" id="crop-dim">—</span>
+    <b>Crop offset:</b><span class="crop-val" id="crop-off">—</span>
+    <b class="start">In:</b><span class="start" id="t-start">—</span>
+    <b class="end">Out:</b><span class="end" id="t-end">—</span>
+    <b>Trim length:</b><span id="t-len">—</span>
+    <b>Current:</b><span id="t-cur">00:00:00.000</span>
+  </div>
+
+  <h3>FFmpeg Command</h3>
+  <div class="ffmpeg-box">
+    <code id="ffmpeg-cmd" class="empty">Drag on the video to draw a bounding box.</code>
+    <button id="copy-ffmpeg" class="copy-btn" disabled>📋 Copy + JSON</button>
+  </div>
+
+  <div id="status"></div>
+
+  <div class="hint">
+    Drag on the video to draw a crop region · drag the box to move · drag handles to resize<br>
+    Keys: <kbd>Space</kbd> play/pause &nbsp;
+    <kbd>I</kbd> mark in &nbsp;
+    <kbd>O</kbd> mark out &nbsp;
+    <kbd>A</kbd> select all crop &nbsp;
+    <kbd>Esc</kbd> clear crop &nbsp;
+    <kbd>↑</kbd>/<kbd>↓</kbd>/<kbd>←</kbd>/<kbd>→</kbd> nudge box (<kbd>Shift</kbd> for 10px)
+  </div>
+</div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+const video = $('video');
+const overlay = $('overlay');
+const cropBox = $('crop-box');
+const cropLabel = $('crop-label');
+
+let crop = null;
+let sourceFile = null;
+let sourceName = 'video';
+let startTime = null;
+let endTime = null;
+
+const scrubber = $('scrubber');
+let scrubbing = false;
+let wasPlayingBeforeScrub = false;
+
+let exportUuid = null;
+let exportUuidKey = null;
+function ensureUuid() {
+  const cropKey = crop ? `${crop.x},${crop.y},${crop.w},${crop.h}` : '-';
+  const trimKey = `${startTime ?? '-'}|${endTime ?? '-'}`;
+  const key = `${cropKey}::${trimKey}`;
+  if (key !== exportUuidKey || !exportUuid) {
+    exportUuid = crypto.randomUUID ? crypto.randomUUID()
+      : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+    exportUuidKey = key;
+  }
+  return exportUuid;
+}
+
+function fmtTime(t) {
+  if (t == null || isNaN(t)) return '—';
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = Math.floor(t % 60);
+  const ms = Math.round((t - Math.floor(t)) * 1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+function nameForTime(t) {
+  return t.toFixed(3).replace('.', 's');
+}
+
+function snap(v) {
+  v = Math.round(v);
+  return $('snap-even').checked ? (v - (v % 2)) : v;
+}
+
+function getRatio() {
+  const v = $('aspect-lock').value;
+  if (v === 'free') return null;
+  const [a, b] = v.split(':').map(Number);
+  return a / b;
+}
+
+function clampCrop() {
+  if (!crop) return;
+  const W = video.videoWidth, H = video.videoHeight;
+  const ratio = getRatio();
+  if (ratio) {
+    crop.w = Math.max(2, Math.min(W, crop.w));
+    crop.h = crop.w / ratio;
+    if (crop.h > H) { crop.h = H; crop.w = crop.h * ratio; }
+    crop.h = Math.max(2, crop.h);
+  } else {
+    crop.w = Math.max(2, Math.min(W, crop.w));
+    crop.h = Math.max(2, Math.min(H, crop.h));
+  }
+  crop.x = Math.max(0, Math.min(W - crop.w, crop.x));
+  crop.y = Math.max(0, Math.min(H - crop.h, crop.y));
+}
+
+function snapCropPreservingRatio() {
+  if (!crop) return;
+  const ratio = getRatio();
+  crop.x = snap(crop.x);
+  crop.y = snap(crop.y);
+  if (ratio) {
+    crop.w = snap(crop.w);
+    crop.h = snap(crop.w / ratio);
+  } else {
+    crop.w = snap(crop.w);
+    crop.h = snap(crop.h);
+  }
+}
+
+function syncOverlay() {
+  if (!video.videoWidth) return;
+  const v = video.getBoundingClientRect();
+  const p = $('player').getBoundingClientRect();
+  overlay.style.left = (v.left - p.left) + 'px';
+  overlay.style.top = (v.top - p.top) + 'px';
+  overlay.style.width = v.width + 'px';
+  overlay.style.height = v.height + 'px';
+  renderCropBox();
+}
+
+function renderCropBox() {
+  if (!crop || !video.videoWidth) {
+    cropBox.style.display = 'none';
+    updateInfo();
+    return;
+  }
+  const v = video.getBoundingClientRect();
+  const sx = v.width / video.videoWidth;
+  const sy = v.height / video.videoHeight;
+  cropBox.style.display = 'block';
+  cropBox.style.left = (crop.x * sx) + 'px';
+  cropBox.style.top = (crop.y * sy) + 'px';
+  cropBox.style.width = (crop.w * sx) + 'px';
+  cropBox.style.height = (crop.h * sy) + 'px';
+  cropLabel.textContent = `${crop.w} × ${crop.h}`;
+  updateInfo();
+}
+
+function updateInfo() {
+  if (video.videoWidth) {
+    $('src-dim').textContent = `${video.videoWidth} × ${video.videoHeight}`;
+    $('dur').textContent = fmtTime(video.duration);
+  } else {
+    $('src-dim').textContent = '—';
+    $('dur').textContent = '—';
+  }
+  if (crop) {
+    $('crop-dim').textContent = `${crop.w} × ${crop.h}`;
+    $('crop-off').textContent = `x=${crop.x}, y=${crop.y}`;
+  } else {
+    $('crop-dim').textContent = '—';
+    $('crop-off').textContent = '—';
+  }
+  $('t-start').textContent = fmtTime(startTime);
+  $('t-end').textContent   = fmtTime(endTime);
+  $('t-len').textContent   = (startTime != null && endTime != null && endTime > startTime)
+    ? fmtTime(endTime - startTime) : '—';
+  $('t-cur').textContent   = fmtTime(video.currentTime);
+  updateScrubber();
+  updateFfmpegCmd();
+}
+
+function updateScrubber() {
+  const dur = video.duration;
+  if (!dur || isNaN(dur)) return;
+  scrubber.max = dur;
+  if (!scrubbing) scrubber.value = video.currentTime;
+  const sEl = $('scrubber-start'), eEl = $('scrubber-end'), rEl = $('scrubber-range');
+  if (startTime != null) {
+    sEl.style.display = 'block';
+    sEl.style.left = `calc(${(startTime / dur) * 100}% - 1px)`;
+  } else sEl.style.display = 'none';
+  if (endTime != null) {
+    eEl.style.display = 'block';
+    eEl.style.left = `calc(${(endTime / dur) * 100}% - 1px)`;
+  } else eEl.style.display = 'none';
+  if (startTime != null && endTime != null && endTime > startTime) {
+    rEl.style.display = 'block';
+    rEl.style.left = `${(startTime / dur) * 100}%`;
+    rEl.style.width = `${((endTime - startTime) / dur) * 100}%`;
+  } else rEl.style.display = 'none';
+}
+
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+function buildPlan() {
+  if (!sourceFile) return null;
+  const hasCrop = !!crop && crop.w >= 2 && crop.h >= 2;
+  const hasTrim = startTime != null && endTime != null && endTime > startTime;
+  if (!hasCrop && !hasTrim) return null;
+
+  const input = sourceFile.name;
+  const useUuid = $('uuid-name').checked;
+  const uuid = ensureUuid();
+  let outBase;
+  if (useUuid) {
+    outBase = uuid;
+  } else {
+    const parts = [sourceName];
+    if (hasTrim) parts.push(`trim_${nameForTime(startTime)}-${nameForTime(endTime)}`);
+    if (hasCrop) parts.push(`crop_${crop.w}x${crop.h}_at_${crop.x}-${crop.y}`);
+    outBase = parts.join('_');
+  }
+  const output = `${outBase}.mp4`;
+
+  const filter = hasCrop ? `crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}` : null;
+  // Crop filter forces re-encode; otherwise honor the toggle.
+  const reencode = hasCrop || $('reencode').checked;
+  const ss = hasTrim ? fmtTime(startTime) : null;
+  const to = hasTrim ? fmtTime(endTime) : null;
+
+  let cmd;
+  if (reencode) {
+    const parts = ['ffmpeg', '-i', shellQuote(input)];
+    if (hasTrim) parts.push('-ss', ss, '-to', to);
+    if (filter) parts.push('-filter:v', shellQuote(filter));
+    parts.push('-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-c:a', 'copy', shellQuote(output));
+    cmd = parts.join(' ');
+  } else {
+    // Trim only, stream copy — fast input seek, keyframe-aligned.
+    const parts = ['ffmpeg'];
+    if (hasTrim) parts.push('-ss', ss, '-to', to);
+    parts.push('-i', shellQuote(input), '-c', 'copy', shellQuote(output));
+    cmd = parts.join(' ');
+  }
+
+  return { cmd, uuid, outBase, output, filter, reencode, hasCrop, hasTrim, ss, to };
+}
+
+function updateFfmpegCmd() {
+  const plan = buildPlan();
+  const el = $('ffmpeg-cmd');
+  const btn = $('copy-ffmpeg');
+  if (plan) {
+    el.textContent = plan.cmd;
+    el.classList.remove('empty');
+    btn.disabled = false;
+  } else {
+    el.textContent = 'Draw a bounding box and/or mark in/out to generate command.';
+    el.classList.add('empty');
+    btn.disabled = true;
+  }
+}
+
+function pointerToSource(e) {
+  const r = overlay.getBoundingClientRect();
+  const sx = video.videoWidth / r.width;
+  const sy = video.videoHeight / r.height;
+  return {
+    x: Math.max(0, Math.min(video.videoWidth,  (e.clientX - r.left) * sx)),
+    y: Math.max(0, Math.min(video.videoHeight, (e.clientY - r.top)  * sy)),
+  };
+}
+
+let dragging = null;
+
+overlay.addEventListener('pointerdown', e => {
+  if (!video.videoWidth || e.button !== 0) return;
+  overlay.setPointerCapture(e.pointerId);
+  const handle = e.target.dataset?.h;
+  if (handle && crop) {
+    dragging = { mode: 'resize', handle, anchor: { ...crop } };
+  } else if (e.target === cropBox && crop) {
+    const pt = pointerToSource(e);
+    dragging = { mode: 'move', offset: { x: pt.x - crop.x, y: pt.y - crop.y } };
+  } else {
+    const pt = pointerToSource(e);
+    crop = { x: pt.x, y: pt.y, w: 0, h: 0 };
+    dragging = { mode: 'draw', start: pt };
+  }
+  e.preventDefault();
+});
+
+overlay.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const pt = pointerToSource(e);
+  const ratio = getRatio();
+  if (dragging.mode === 'draw') {
+    const dx = pt.x - dragging.start.x;
+    const dy = pt.y - dragging.start.y;
+    let w, h;
+    if (ratio) {
+      const aw = Math.abs(dx), ah = Math.abs(dy);
+      const signX = dx >= 0 ? 1 : -1;
+      const signY = dy >= 0 ? 1 : -1;
+      if (aw / Math.max(ah, 1e-6) > ratio) { w = aw * signX; h = (aw / ratio) * signY; }
+      else                                  { h = ah * signY; w = (ah * ratio) * signX; }
+    } else { w = dx; h = dy; }
+    const x1 = w >= 0 ? dragging.start.x : dragging.start.x + w;
+    const y1 = h >= 0 ? dragging.start.y : dragging.start.y + h;
+    crop = { x: x1, y: y1, w: Math.abs(w), h: Math.abs(h) };
+  } else if (dragging.mode === 'move') {
+    const W = video.videoWidth, H = video.videoHeight;
+    crop.x = Math.max(0, Math.min(W - crop.w, pt.x - dragging.offset.x));
+    crop.y = Math.max(0, Math.min(H - crop.h, pt.y - dragging.offset.y));
+  } else if (dragging.mode === 'resize') {
+    const a = dragging.anchor;
+    const hName = dragging.handle;
+    let x = a.x, y = a.y, w = a.w, hh = a.h;
+    if (ratio && hName.length === 2) {
+      // Corner resize with locked ratio: opposite corner is the anchor.
+      const ax = hName.includes('w') ? a.x + a.w : a.x;
+      const ay = hName.includes('n') ? a.y + a.h : a.y;
+      const dx = pt.x - ax, dy = pt.y - ay;
+      const aw = Math.abs(dx), ah = Math.abs(dy);
+      const signX = hName.includes('w') ? -1 : 1;
+      const signY = hName.includes('n') ? -1 : 1;
+      let nw, nh;
+      if (aw / Math.max(ah, 1e-6) > ratio) { nw = aw; nh = aw / ratio; }
+      else                                  { nh = ah; nw = ah * ratio; }
+      w = nw; hh = nh;
+      x = signX > 0 ? ax : ax - nw;
+      y = signY > 0 ? ay : ay - nh;
+    } else if (ratio && (hName === 'e' || hName === 'w')) {
+      // Edge resize with locked ratio: width drives height, keep top edge fixed.
+      if (hName === 'e') w = pt.x - a.x;
+      else { w = a.x + a.w - pt.x; x = pt.x; }
+      if (w < 0) { x = hName === 'e' ? a.x + w : a.x + a.w; w = -w; }
+      hh = w / ratio;
+      y = a.y;
+    } else if (ratio && (hName === 'n' || hName === 's')) {
+      // Edge resize with locked ratio: height drives width, keep left edge fixed.
+      if (hName === 's') hh = pt.y - a.y;
+      else { hh = a.y + a.h - pt.y; y = pt.y; }
+      if (hh < 0) { y = hName === 's' ? a.y + hh : a.y + a.h; hh = -hh; }
+      w = hh * ratio;
+      x = a.x;
+    } else {
+      if (hName.includes('e')) w = pt.x - a.x;
+      if (hName.includes('w')) { w = a.x + a.w - pt.x; x = pt.x; }
+      if (hName.includes('s')) hh = pt.y - a.y;
+      if (hName.includes('n')) { hh = a.y + a.h - pt.y; y = pt.y; }
+      if (w < 0)  { x += w;  w  = -w;  }
+      if (hh < 0) { y += hh; hh = -hh; }
+    }
+    crop = { x, y, w, h: hh };
+  }
+  clampCrop();
+  renderCropBox();
+});
+
+function finishDrag() {
+  if (!dragging) return;
+  dragging = null;
+  if (crop) {
+    snapCropPreservingRatio();
+    if (crop.w < 2 || crop.h < 2) crop = null;
+    clampCrop();
+    renderCropBox();
+  }
+}
+overlay.addEventListener('pointerup', finishDrag);
+overlay.addEventListener('pointercancel', finishDrag);
+
+$('select-all').onclick = () => {
+  if (!video.videoWidth) return;
+  const W = video.videoWidth, H = video.videoHeight;
+  const ratio = getRatio();
+  if (ratio) {
+    let w = W, h = w / ratio;
+    if (h > H) { h = H; w = h * ratio; }
+    crop = { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  } else {
+    crop = { x: 0, y: 0, w: W, h: H };
+  }
+  snapCropPreservingRatio();
+  clampCrop();
+  renderCropBox();
+};
+$('reset-crop').onclick = () => { crop = null; renderCropBox(); };
+
+$('aspect-lock').addEventListener('change', () => {
+  const ratio = getRatio();
+  if (crop && ratio) {
+    const cx = crop.x + crop.w / 2;
+    const cy = crop.y + crop.h / 2;
+    let w = crop.w, h = crop.w / ratio;
+    if (h > video.videoHeight) { h = video.videoHeight; w = h * ratio; }
+    if (w > video.videoWidth)  { w = video.videoWidth;  h = w / ratio; }
+    crop = { x: cx - w / 2, y: cy - h / 2, w, h };
+    snapCropPreservingRatio();
+    clampCrop();
+  }
+  renderCropBox();
+});
+
+$('snap-even').addEventListener('change', () => {
+  if (crop) {
+    snapCropPreservingRatio();
+    clampCrop();
+    renderCropBox();
+  }
+});
+$('uuid-name').addEventListener('change', updateFfmpegCmd);
+$('reencode').addEventListener('change', updateFfmpegCmd);
+
+$('play').onclick = () => video.play();
+$('pause').onclick = () => video.pause();
+
+$('set-start').onclick = () => {
+  if (!video.duration) return;
+  startTime = video.currentTime;
+  if (endTime != null && endTime <= startTime) endTime = null;
+  updateInfo();
+};
+$('set-end').onclick = () => {
+  if (!video.duration) return;
+  endTime = video.currentTime;
+  if (startTime != null && startTime >= endTime) startTime = null;
+  updateInfo();
+};
+$('goto-start').onclick = () => { if (startTime != null) video.currentTime = startTime; };
+$('goto-end').onclick   = () => { if (endTime   != null) video.currentTime = endTime;   };
+$('clear-marks').onclick = () => { startTime = null; endTime = null; updateInfo(); };
+
+scrubber.addEventListener('pointerdown', () => {
+  scrubbing = true;
+  wasPlayingBeforeScrub = !video.paused;
+  if (wasPlayingBeforeScrub) video.pause();
+});
+scrubber.addEventListener('pointerup', () => {
+  scrubbing = false;
+  if (wasPlayingBeforeScrub) video.play();
+});
+scrubber.addEventListener('input', () => {
+  if (!video.duration) return;
+  video.currentTime = parseFloat(scrubber.value);
+});
+
+video.addEventListener('timeupdate', updateInfo);
+video.addEventListener('seeked', updateInfo);
+video.addEventListener('durationchange', updateInfo);
+
+$('copy-ffmpeg').onclick = async () => {
+  const plan = buildPlan();
+  if (!plan) return;
+  const btn = $('copy-ffmpeg');
+  try { await navigator.clipboard.writeText(plan.cmd); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = plan.cmd;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch {}
+    ta.remove();
+  }
+
+  const meta = {
+    uuid: plan.uuid,
+    originalFilename: sourceFile?.name ?? null,
+    source: sourceName,
+    sourceResolution: { width: video.videoWidth, height: video.videoHeight },
+    duration: video.duration,
+    crop: plan.hasCrop ? { x: crop.x, y: crop.y, width: crop.w, height: crop.h } : null,
+    cropNormalized: plan.hasCrop ? {
+      x: crop.x / video.videoWidth,
+      y: crop.y / video.videoHeight,
+      width: crop.w / video.videoWidth,
+      height: crop.h / video.videoHeight,
+    } : null,
+    trim: plan.hasTrim ? {
+      start:    { timestamp: fmtTime(startTime),           seconds: startTime },
+      end:      { timestamp: fmtTime(endTime),             seconds: endTime },
+      duration: { timestamp: fmtTime(endTime - startTime), seconds: endTime - startTime },
+    } : null,
+    exportedAt: new Date().toISOString(),
+    output: plan.output,
+    ffmpeg: { filter: plan.filter, reencode: plan.reencode, command: plan.cmd },
+  };
+  downloadBlob(
+    new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' }),
+    plan.outBase + '.json'
+  );
+
+  const orig = btn.textContent;
+  btn.textContent = '✓ Copied + JSON saved';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1400);
+};
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 1000);
+}
+
+async function loadVideoFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('video/') && !/\.(mp4|m4v|mov|webm|mkv|avi)$/i.test(file.name)) {
+    alert('Not a video file: ' + file.name);
+    return;
+  }
+  sourceFile = file;
+  sourceName = file.name.replace(/\.[^.]+$/, '');
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(file);
+  $('player-wrap').style.display = 'block';
+  $('drop-zone').textContent = `Loaded: ${file.name} — drop another to replace`;
+  $('status').textContent = 'Loading video…';
+  crop = null;
+  startTime = null;
+  endTime = null;
+  await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+  await new Promise(r => requestAnimationFrame(r));
+  scrubber.max = video.duration || 1;
+  scrubber.value = 0;
+  syncOverlay();
+  updateInfo();
+  $('status').textContent = '';
+  if (document.activeElement?.blur) document.activeElement.blur();
+}
+
+$('file').addEventListener('change', e => loadVideoFile(e.target.files[0]));
+
+let dragDepth = 0;
+window.addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); dragDepth++;
+  document.body.classList.add('dragging');
+});
+window.addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragleave', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('dragging');
+});
+window.addEventListener('drop', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const file = e.dataTransfer.files[0];
+  if (file) loadVideoFile(file);
+});
+
+const ro = new ResizeObserver(syncOverlay);
+ro.observe(video);
+window.addEventListener('resize', syncOverlay);
+video.addEventListener('loadedmetadata', syncOverlay);
+video.addEventListener('loadeddata', syncOverlay);
+
+function nudge(dx, dy) {
+  if (!crop) return;
+  const step = $('snap-even').checked ? 2 : 1;
+  crop.x = snap(crop.x + dx * step);
+  crop.y = snap(crop.y + dy * step);
+  clampCrop();
+  renderCropBox();
+}
+
+const TYPING = new Set(['text','number','search','email','url','tel','password']);
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'TEXTAREA') return;
+  if (tag === 'INPUT' && TYPING.has((e.target.type || '').toLowerCase())) return;
+  switch (e.key) {
+    case ' ':
+      if (!video.src) return;
+      e.preventDefault();
+      video.paused ? video.play() : video.pause();
+      break;
+    case 'a': case 'A':
+      e.preventDefault();
+      $('select-all').click();
+      break;
+    case 'i': case 'I':
+      e.preventDefault();
+      $('set-start').click();
+      break;
+    case 'o': case 'O':
+      e.preventDefault();
+      $('set-end').click();
+      break;
+    case 'Escape':
+      e.preventDefault();
+      $('reset-crop').click();
+      break;
+    case 'ArrowLeft':  if (crop) { e.preventDefault(); nudge(e.shiftKey ? -10 : -1, 0); } break;
+    case 'ArrowRight': if (crop) { e.preventDefault(); nudge(e.shiftKey ?  10 :  1, 0); } break;
+    case 'ArrowUp':    if (crop) { e.preventDefault(); nudge(0, e.shiftKey ? -10 : -1); } break;
+    case 'ArrowDown':  if (crop) { e.preventDefault(); nudge(0, e.shiftKey ?  10 :  1); } break;
+  }
+});
+</script>
+</body>
+</html>

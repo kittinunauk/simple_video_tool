@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simple MP4 Trimmer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #161616; color: #eee;
+    padding: 20px; max-width: 900px; margin: 0 auto;
+  }
+  h1 { margin: 0; font-size: 20px; }
+  a { color: #4a9eff; }
+  .top-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .top-bar .spacer { flex: 1; }
+
+  button {
+    padding: 8px 14px; background: #2a2a2a; color: #eee;
+    border: 1px solid #444; border-radius: 4px; cursor: pointer;
+    font-size: 13px; font-family: inherit;
+  }
+  button:hover:not(:disabled) { background: #3a3a3a; border-color: #666; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.primary { background: #1e5fb4; border-color: #2a7fd4; }
+  button.primary:hover:not(:disabled) { background: #2a7fd4; }
+  button.danger { background: #5a1e1e; border-color: #8a2e2e; }
+  button.danger:hover:not(:disabled) { background: #7a2e2e; }
+
+  #drop-zone {
+    border: 2px dashed #444; border-radius: 8px;
+    padding: 32px; text-align: center; color: #888;
+    margin-bottom: 12px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  #drop-zone:hover { border-color: #666; color: #aaa; }
+  body.dragging #drop-zone { border-color: #4a9eff; background: rgba(74,158,255,0.08); color: #fff; }
+  body.dragging::after {
+    content: 'Drop MP4 to load';
+    position: fixed; inset: 0;
+    background: rgba(20,20,20,0.85);
+    border: 3px dashed #4a9eff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; color: #fff; z-index: 1000;
+    pointer-events: none;
+  }
+
+  video { width: 100%; max-height: 55vh; background: #000; display: block; border-radius: 6px; }
+
+  .dual-range {
+    position: relative; height: 36px; margin: 14px 0 4px;
+  }
+  .dr-track {
+    position: absolute; left: 0; right: 0; top: 16px; height: 6px;
+    background: #2a2a2a; border-radius: 3px;
+  }
+  .dr-fill {
+    position: absolute; top: 16px; height: 6px;
+    background: rgba(74, 158, 255, 0.55); border-radius: 3px;
+  }
+  .dual-range input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    position: absolute; top: 0; left: 0;
+    width: 100%; height: 36px;
+    background: transparent; pointer-events: none;
+    margin: 0; padding: 0;
+  }
+  .dual-range input[type=range]::-webkit-slider-runnable-track { background: transparent; height: 36px; }
+  .dual-range input[type=range]::-moz-range-track { background: transparent; border: none; height: 36px; }
+  .dual-range input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 16px; height: 28px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff;
+    cursor: grab; pointer-events: auto;
+    margin-top: 4px;
+  }
+  .dual-range input[type=range]::-moz-range-thumb {
+    width: 16px; height: 28px; border-radius: 3px;
+    background: #4a9eff; border: 1px solid #fff;
+    cursor: grab; pointer-events: auto;
+  }
+  #dr-start::-webkit-slider-thumb { background: #9fd96f; }
+  #dr-end::-webkit-slider-thumb   { background: #f3a96b; }
+  #dr-start::-moz-range-thumb { background: #9fd96f; }
+  #dr-end::-moz-range-thumb   { background: #f3a96b; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; align-items: center; }
+  .info {
+    background: #1f1f1f; padding: 12px 16px; border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+    display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px 16px;
+    align-items: center;
+  }
+  .info b { color: #888; font-weight: normal; }
+  .info span { color: #fff; }
+  .info .in  { color: #9fd96f; }
+  .info .out { color: #f3a96b; }
+
+  #status { font-size: 13px; color: #aaa; min-height: 1.2em; margin-top: 8px; }
+  #mode-note { font-size: 12px; color: #777; margin-top: 4px; }
+  .filename { font-family: ui-monospace, monospace; color: #ddd; }
+  .badge {
+    font-size: 11px; padding: 2px 6px; border-radius: 3px;
+    background: #2e5a1e; color: #d6f3c5; font-family: ui-monospace, monospace;
+  }
+  .badge.warn { background: #5a4a1e; color: #ffd28a; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <h1>Simple MP4 Trimmer</h1>
+  <div class="spacer"></div>
+  <a href="index.html">Trimmer (export)</a>
+  <a href="crop_tool.html">Crop Tool</a>
+</div>
+
+<div id="api-warn" style="display:none;background:#5a2a1e;border:1px solid #8a4a2e;color:#ffd2c5;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:13px;">
+  ⚠ This browser does not support the File System Access API.
+  Save will <strong>download a copy</strong> — it can't overwrite the source file in place.
+  Use Chrome, Edge, or Opera for true overwrite.
+</div>
+
+<div id="drop-zone">
+  <div><strong>Drop an MP4</strong> here, or click to open</div>
+  <div style="margin-top:6px;font-size:12px">
+    Opens read/write so the trimmed clip <strong>overwrites the source file in place</strong>.<br>
+    (Falls back to download if your browser lacks the File System Access API.)
+  </div>
+</div>
+<input type="file" id="file" accept="video/mp4,video/quicktime,.mp4,.m4v,.mov" style="display:none">
+
+<div id="player" style="display:none">
+  <video id="video" controls preload="auto"></video>
+
+  <div class="dual-range">
+    <div class="dr-track"></div>
+    <div class="dr-fill" id="dr-fill"></div>
+    <input type="range" id="dr-start" min="0" max="10000" value="0"     step="1">
+    <input type="range" id="dr-end"   min="0" max="10000" value="10000" step="1">
+  </div>
+
+  <div class="controls">
+    <button id="play" class="primary">▶ Play</button>
+    <button id="pause">⏸ Pause</button>
+    <button id="goto-in">Go to In</button>
+    <button id="goto-out">Go to Out</button>
+    <button id="preview">Preview Range</button>
+    <button id="reset">Reset Range</button>
+    <div style="flex:1"></div>
+    <button id="save" class="danger" disabled>💾 Save (overwrite)</button>
+  </div>
+
+  <div class="info">
+    <b>File:</b><span class="filename" id="filename">—</span>
+    <b>Mode:</b><span id="mode-badge">—</span>
+    <b class="in">In:</b><span class="in" id="t-in">—</span>
+    <b class="out">Out:</b><span class="out" id="t-out">—</span>
+    <b>Trim length:</b><span id="t-len">—</span>
+    <b>Current:</b><span id="t-cur">00:00.000</span>
+  </div>
+
+  <div id="status"></div>
+  <div id="mode-note">
+    Trim is stream-copy and <strong>keyframe-aligned</strong> — the output may start at the nearest
+    keyframe at or before your In point (no re-encode, fast, lossless).
+  </div>
+</div>
+
+<script type="module">
+const $ = id => document.getElementById(id);
+if (!window.showOpenFilePicker) $('api-warn').style.display = 'block';
+const video = $('video');
+const drStart = $('dr-start');
+const drEnd   = $('dr-end');
+const drFill  = $('dr-fill');
+const STEPS = 10000;
+
+let fileHandle = null;   // FileSystemFileHandle when available
+let sourceFile = null;   // File
+let duration = 0;
+let inSec  = 0;
+let outSec = 0;
+
+function fmt(t) {
+  if (t == null || isNaN(t) || !isFinite(t)) return '—';
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  const ms = Math.round((t - Math.floor(t)) * 1000);
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+
+function syncRange() {
+  const a = +drStart.value, b = +drEnd.value;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  inSec  = (lo / STEPS) * duration;
+  outSec = (hi / STEPS) * duration;
+  drFill.style.left  = (lo / STEPS * 100) + '%';
+  drFill.style.width = ((hi - lo) / STEPS * 100) + '%';
+  $('t-in').textContent  = fmt(inSec);
+  $('t-out').textContent = fmt(outSec);
+  $('t-len').textContent = fmt(outSec - inSec);
+  const validRange = (outSec - inSec) > 0.05;
+  const fullRange = lo === 0 && hi === STEPS;
+  $('save').disabled = !sourceFile || !validRange || fullRange;
+}
+
+drStart.addEventListener('input', syncRange);
+drEnd.addEventListener('input', syncRange);
+
+$('reset').onclick = () => {
+  drStart.value = 0;
+  drEnd.value = STEPS;
+  syncRange();
+};
+
+$('play').onclick = () => video.play();
+$('pause').onclick = () => video.pause();
+$('goto-in').onclick  = () => { if (duration) video.currentTime = inSec; };
+$('goto-out').onclick = () => { if (duration) video.currentTime = outSec; };
+
+let previewStopAt = null;
+$('preview').onclick = () => {
+  if (!duration) return;
+  video.currentTime = inSec;
+  previewStopAt = outSec;
+  video.play();
+};
+video.addEventListener('timeupdate', () => {
+  $('t-cur').textContent = fmt(video.currentTime);
+  if (previewStopAt != null && video.currentTime >= previewStopAt) {
+    video.pause();
+    previewStopAt = null;
+  }
+});
+
+function setMode() {
+  const badge = $('mode-badge');
+  const btn = $('save');
+  if (fileHandle) {
+    badge.textContent = 'overwrite in place';
+    badge.className = 'badge';
+    btn.textContent = '💾 Save & overwrite';
+  } else {
+    badge.textContent = 'download copy (no overwrite)';
+    badge.className = 'badge warn';
+    btn.textContent = '⬇ Save (download copy)';
+  }
+}
+
+async function loadVideo(file) {
+  sourceFile = file;
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(file);
+  $('player').style.display = 'block';
+  $('filename').textContent = file.name;
+  $('status').textContent = '';
+  setMode();
+  await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+  duration = video.duration;
+  drStart.value = 0;
+  drEnd.value = STEPS;
+  syncRange();
+}
+
+async function tryGrantWrite(h) {
+  try {
+    let perm = await h.queryPermission({ mode: 'readwrite' });
+    if (perm !== 'granted') perm = await h.requestPermission({ mode: 'readwrite' });
+    return perm === 'granted';
+  } catch (e) {
+    console.warn('Permission request failed:', e);
+    return false;
+  }
+}
+
+async function pickFile() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({
+        types: [{ description: 'MP4 video', accept: { 'video/mp4': ['.mp4', '.m4v', '.mov'] } }],
+        multiple: false,
+      });
+      // Request write permission NOW while the user gesture is still fresh.
+      // Doing this later (e.g. inside Save handler after a long trim) consumes
+      // the user-activation window and the prompt silently fails.
+      const granted = await tryGrantWrite(h);
+      fileHandle = granted ? h : null;
+      const f = await h.getFile();
+      await loadVideo(f);
+      if (!granted) {
+        $('status').textContent =
+          'Write permission was denied — Save will download a copy instead of overwriting.';
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error(e);
+    }
+  } else {
+    $('file').click();
+  }
+}
+
+$('drop-zone').onclick = pickFile;
+$('file').addEventListener('change', async e => {
+  if (!e.target.files[0]) return;
+  fileHandle = null;
+  await loadVideo(e.target.files[0]);
+});
+
+let dragDepth = 0;
+window.addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); dragDepth++;
+  document.body.classList.add('dragging');
+});
+window.addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+});
+window.addEventListener('dragleave', e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) document.body.classList.remove('dragging');
+});
+window.addEventListener('drop', async e => {
+  if (!e.dataTransfer?.types?.includes('Files')) return;
+  e.preventDefault(); dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const items = e.dataTransfer.items;
+  if (items && items[0]?.getAsFileSystemHandle) {
+    try {
+      const h = await items[0].getAsFileSystemHandle();
+      if (h?.kind === 'file') {
+        const granted = await tryGrantWrite(h);
+        fileHandle = granted ? h : null;
+        const f = await h.getFile();
+        await loadVideo(f);
+        if (!granted) {
+          $('status').textContent =
+            'Write permission was denied — Save will download a copy instead of overwriting.';
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn('getAsFileSystemHandle failed:', err);
+    }
+  }
+  fileHandle = null;
+  const f = e.dataTransfer.files[0];
+  if (f) await loadVideo(f);
+});
+
+function makeAacDsi(sampleRate, channels) {
+  const rates = [96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000];
+  const idx = rates.indexOf(sampleRate);
+  if (idx < 0) return null;
+  const objectType = 2; // AAC-LC
+  const b0 = (objectType << 3) | (idx >> 1);
+  const b1 = ((idx & 1) << 7) | ((channels & 0x0F) << 3);
+  return new Uint8Array([b0, b1]);
+}
+
+async function trimToBuffer(file, startSec, endSec, onStatus) {
+  const mp4mod = await import('https://cdn.jsdelivr.net/npm/mp4box@0.5.4/+esm');
+  const MP4Box = mp4mod.default || mp4mod;
+  const DataStream = MP4Box.DataStream;
+  const muxMod = await import('https://esm.run/mp4-muxer@5');
+  const Muxer = muxMod.Muxer;
+  const ArrayBufferTarget = muxMod.ArrayBufferTarget;
+
+  const startUs = Math.round(startSec * 1_000_000);
+  const endUs   = Math.round(endSec * 1_000_000);
+
+  return await new Promise((resolve, reject) => {
+    const mp4box = MP4Box.createFile();
+    let videoTrack = null, audioTrack = null;
+    let videoDesc = null;
+    let videoCodec = null, audioCodec = null;
+
+    let kfBuffer = [];
+    const videoOut = [];
+    const audioBuffer = [];
+    let firstOutTs = null;
+    let videoDone = false;
+
+    mp4box.onError = (err) => reject(new Error('mp4box: ' + err));
+    mp4box.onReady = (info) => {
+      const vt = info.videoTracks[0];
+      if (!vt) { reject(new Error('No video track found')); return; }
+      videoTrack = vt;
+      audioTrack = info.audioTracks[0] || null;
+
+      const vc = (vt.codec || '').toLowerCase();
+      if (vc.startsWith('avc')) videoCodec = 'avc';
+      else if (vc.startsWith('hev') || vc.startsWith('hvc')) videoCodec = 'hevc';
+      else { reject(new Error('Unsupported video codec: ' + vt.codec)); return; }
+
+      const vTrak = mp4box.getTrackById(vt.id);
+      for (const entry of vTrak.mdia.minf.stbl.stsd.entries) {
+        const box = entry.avcC || entry.hvcC;
+        if (box) {
+          const ds = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+          box.write(ds);
+          videoDesc = new Uint8Array(ds.buffer, 8);
+          break;
+        }
+      }
+      if (!videoDesc) { reject(new Error('Video codec config (avcC/hvcC) not found')); return; }
+      mp4box.setExtractionOptions(vt.id, 'v', { nbSamples: 200 });
+
+      if (audioTrack) {
+        const ac = (audioTrack.codec || '').toLowerCase();
+        if (ac.startsWith('mp4a')) audioCodec = 'aac';
+        // Other audio codecs are skipped (track dropped, output is video-only).
+        if (audioCodec) mp4box.setExtractionOptions(audioTrack.id, 'a', { nbSamples: 200 });
+      }
+
+      mp4box.onSamples = (id, user, samples) => {
+        for (const s of samples) {
+          if (user === 'v') {
+            if (videoDone) continue;
+            const cts = (s.cts * 1_000_000) / videoTrack.timescale;
+            const dur = (s.duration * 1_000_000) / videoTrack.timescale;
+            if (cts > endUs) { videoDone = true; continue; }
+            const sample = { cts, duration: dur, is_sync: !!s.is_sync, data: new Uint8Array(s.data) };
+            if (firstOutTs == null) {
+              if (s.is_sync) kfBuffer = [sample];
+              else if (kfBuffer.length) kfBuffer.push(sample);
+              if (cts >= startUs && kfBuffer.length) {
+                for (const k of kfBuffer) videoOut.push(k);
+                firstOutTs = kfBuffer[0].cts;
+                kfBuffer = null;
+              }
+            } else {
+              videoOut.push(sample);
+            }
+          } else if (user === 'a' && audioCodec) {
+            const cts = (s.cts * 1_000_000) / audioTrack.timescale;
+            const dur = (s.duration * 1_000_000) / audioTrack.timescale;
+            if (cts > endUs) continue;
+            audioBuffer.push({ cts, duration: dur, data: new Uint8Array(s.data) });
+          }
+        }
+        try { mp4box.releaseUsedSamples(id, samples[samples.length-1].number + 1); } catch {}
+      };
+
+      mp4box.start();
+    };
+
+    (async () => {
+      try {
+        const reader = file.stream().getReader();
+        let offset = 0;
+        const total = file.size;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const ab = new ArrayBuffer(value.byteLength);
+          new Uint8Array(ab).set(value);
+          ab.fileStart = offset;
+          mp4box.appendBuffer(ab);
+          offset += value.byteLength;
+          if (onStatus) onStatus(`Reading source ${Math.round(offset/total*100)}%…`);
+          if ((offset & 0x7FFFFF) === 0) await new Promise(r => setTimeout(r, 0));
+        }
+        mp4box.flush();
+
+        if (firstOutTs == null && kfBuffer && kfBuffer.length) {
+          for (const k of kfBuffer) videoOut.push(k);
+          firstOutTs = kfBuffer[0].cts;
+        }
+        if (!videoOut.length) {
+          reject(new Error('No video samples in the selected range.'));
+          return;
+        }
+
+        if (onStatus) onStatus('Muxing trimmed clip…');
+
+        const width  = videoTrack.video.width;
+        const height = videoTrack.video.height;
+        const muxerConfig = {
+          target: new ArrayBufferTarget(),
+          video: { codec: videoCodec, width, height, frameRate: 30 },
+          fastStart: 'in-memory',
+        };
+        let audioDesc = null;
+        if (audioCodec === 'aac' && audioTrack) {
+          const sr = audioTrack.audio.sample_rate;
+          const ch = audioTrack.audio.channel_count;
+          audioDesc = makeAacDsi(sr, ch);
+          if (audioDesc) {
+            muxerConfig.audio = { codec: 'aac', numberOfChannels: ch, sampleRate: sr };
+          }
+        }
+        const muxer = new Muxer(muxerConfig);
+
+        const tsOffset = firstOutTs;
+        let firstVideo = true;
+        for (const s of videoOut) {
+          const chunk = new EncodedVideoChunk({
+            type: s.is_sync ? 'key' : 'delta',
+            timestamp: Math.round(s.cts - tsOffset),
+            duration: Math.round(s.duration),
+            data: s.data,
+          });
+          const meta = firstVideo ? { decoderConfig: { description: videoDesc } } : undefined;
+          muxer.addVideoChunk(chunk, meta);
+          firstVideo = false;
+        }
+
+        if (muxerConfig.audio && audioDesc) {
+          let firstAudio = true;
+          for (const s of audioBuffer) {
+            if (s.cts < tsOffset) continue;
+            const chunk = new EncodedAudioChunk({
+              type: 'key',
+              timestamp: Math.round(s.cts - tsOffset),
+              duration: Math.round(s.duration),
+              data: s.data,
+            });
+            const meta = firstAudio ? { decoderConfig: { description: audioDesc } } : undefined;
+            muxer.addAudioChunk(chunk, meta);
+            firstAudio = false;
+          }
+        }
+
+        muxer.finalize();
+        resolve(muxer.target.buffer);
+      } catch (err) {
+        reject(err);
+      }
+    })();
+  });
+}
+
+async function releaseVideoSrc() {
+  if (!video.src) return;
+  const oldSrc = video.src;
+  video.pause();
+  await new Promise(resolve => {
+    const done = () => { video.removeEventListener('emptied', done); resolve(); };
+    video.addEventListener('emptied', done);
+    video.removeAttribute('src');
+    try { URL.revokeObjectURL(oldSrc); } catch {}
+    video.load();
+    setTimeout(done, 250);
+  });
+}
+
+$('save').onclick = async () => {
+  if (!sourceFile) return;
+  if (outSec - inSec < 0.05) { alert('Range is too short.'); return; }
+  const btn = $('save');
+  btn.disabled = true;
+
+  // Re-confirm permission (fast — already granted at open time, won't prompt
+  // if state is still 'granted'). This must use queryPermission to avoid
+  // consuming/needing a fresh user activation.
+  let canOverwrite = false;
+  if (fileHandle) {
+    try {
+      const perm = await fileHandle.queryPermission({ mode: 'readwrite' });
+      canOverwrite = perm === 'granted';
+      if (!canOverwrite) {
+        console.warn('readwrite permission no longer granted:', perm);
+      }
+    } catch (e) {
+      console.warn('queryPermission threw:', e);
+    }
+  }
+
+  $('status').textContent = 'Trimming…';
+  try {
+    const buf = await trimToBuffer(sourceFile, inSec, outSec, msg => { $('status').textContent = msg; });
+    const blob = new Blob([buf], { type: 'video/mp4' });
+    console.log('Trim produced', blob.size, 'bytes; canOverwrite =', canOverwrite);
+
+    if (canOverwrite) {
+      $('status').textContent = 'Writing to disk…';
+      await releaseVideoSrc();
+      const writable = await fileHandle.createWritable({ keepExistingData: false });
+      await writable.write(blob);
+      await writable.close();
+      $('status').textContent = `✓ Overwrote ${sourceFile.name} (${(blob.size / 1024 / 1024).toFixed(2)} MiB)`;
+      const refreshed = await fileHandle.getFile();
+      await loadVideo(refreshed);
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = sourceFile.name;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 1000);
+      const reason = fileHandle
+        ? 'write permission not granted'
+        : 'no FileSystemFileHandle (browser may not support it, or file was loaded via plain input)';
+      $('status').textContent = `Downloaded ${sourceFile.name} — overwrite not possible (${reason}).`;
+    }
+  } catch (err) {
+    console.error('Save failed:', err);
+    $('status').textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+  if (!video.src) return;
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      video.paused ? video.play() : video.pause();
+      break;
+    case 'i': case 'I':
+      drStart.value = Math.round((video.currentTime / duration) * STEPS);
+      syncRange();
+      break;
+    case 'o': case 'O':
+      drEnd.value = Math.round((video.currentTime / duration) * STEPS);
+      syncRange();
+      break;
+  }
+});
+</script>
+</body>
+</html>
